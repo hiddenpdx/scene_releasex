@@ -42,5 +42,5 @@ native/scene_releasex_nif/Cargo.lock
 native/scene_releasex_nif/.cargo
 
 # Rustler checksum files
-checksum-*.exs
+#checksum-*.exs
 priv/
