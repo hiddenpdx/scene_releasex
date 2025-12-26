@@ -1,0 +1,46 @@
+# App artifacts
+/_build
+/db
+/deps
+
+# Generated on mix arch cleans
+/.fetch
+
+# The directory Mix downloads your dependencies sources to
+/.mix
+/.cache
+
+# Where 3rd-party dependencies like ExDoc are generated
+/doc
+
+# If the VM crashes, it generates a dump, let's ignore it
+erl_crash.dump
+
+# Also ignore archive artifacts
+*.ez
+
+# Ignore package tarball (created with "mix hex.build")
+*.tar
+
+# Temporary files
+*.tmp
+*~
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cargo build artifacts
+native/scene_releasex_nif/target
+native/scene_releasex_nif/Cargo.lock
+native/scene_releasex_nif/.cargo
+
+# Rustler checksum files
+checksum-*.exs
+priv/
