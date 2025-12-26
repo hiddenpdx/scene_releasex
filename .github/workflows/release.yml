@@ -1,164 +1,80 @@
-name: Build precompiled NIFs
-
-env:
-  NIF_DIRECTORY: native/scene_releasex_nif
-  SKIP_SCENE_RELEASEX_BUILD: true
+name: Build precompiled NIFs and Release
 
 on:
   push:
     tags:
-      - '*'
-
-defaults:
-  run:
-    working-directory: ./native/scene_releasex_nif
+      - "*"
+  workflow_dispatch:
 
 jobs:
   build_release:
     name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
+
     strategy:
       fail-fast: false
       matrix:
-        nif: ['2.15']
+        nif: ["2.15"]
         job:
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
-            use-cross: true
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-20.04
-            use-cross: true
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: arm-unknown-linux-gnueabihf
-            os: ubuntu-20.04
-            use-cross: true
-          - target: riscv64gc-unknown-linux-gnu
-            os: ubuntu-20.04
-            use-cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-20.04
-            use-cross: true
-          - target: x86_64-pc-windows-gnu
-            os: windows-2019
-          - target: x86_64-pc-windows-msvc
-            os: windows-2019
-
-    env:
-      RUSTLER_NIF_VERSION: ${{ matrix.nif }}
+          - { target: arm-unknown-linux-gnueabihf, os: ubuntu-24.04, use-cross: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: riscv64gc-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true }
+          - { target: x86_64-apple-darwin, os: macos-15 }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
+          - { target: x86_64-pc-windows-gnu, os: windows-2025 }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
-        with:
-          path: project
+        uses: actions/checkout@v5
 
-      - name: Checkout Rust crate source
-        uses: actions/checkout@v4
-        with:
-          repository: hiddenpdx/scene-release
-          path: scene-release
-          branch: main
-
-      - name: Install prerequisites
+      - name: Extract project version
         shell: bash
         run: |
-          case ${{ matrix.job.target }} in
-            arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
-            aarch64-unknown-linux-gnu) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
-          esac
+          # Get the project version from mix.exs
+          echo "PROJECT_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)" >> $GITHUB_ENV
 
-      - name: Extract crate information
-        shell: bash
-        run: |
-          echo "PROJECT_NAME=$(sed -n 's/^name = \"\(.*\)\"/\1/p' Cargo.toml | head -n1)" >> $GITHUB_ENV
-          echo "PROJECT_VERSION=$(sed -n 's/^  @version \"\(.*\)\"/\1/p' ../mix.exs | head -n1)" >> $GITHUB_ENV
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.job.target }}
-          override: true
-          profile: minimal
 
-      - name: Show version
-        shell: bash
-        run: |
-          gcc --version || true
-          rustup -V
-          rustup toolchain list
-          rustup default
-          cargo -V
-          rustc -V
-          rustc --print=cfg
-
-      - name: Install cross
-        if: ${{ matrix.job.use-cross }}
-        uses: giantswarm/install-binary-action@v1.0.0
+      - uses: Swatinem/rust-cache@v2
         with:
-          binary: cross
-          version: v0.2.4
-          download_url: https://github.com/cross-rs/cross/releases/download/${version}/cross-x86_64-unknown-linux-gnu.tar.gz
-          tarball_binary_path: ${binary}
-          smoke_test: ${binary} --version
+          prefix-key: v0-precomp
+          shared-key: ${{ matrix.job.target }}-${{ matrix.nif }}
+          workspaces: |
+            native/scene_releasex_nif
 
-      - name: Build lib
+      - name: Set Rust stack size
         shell: bash
         run: |
-          cd ../project/native/scene_releasex_nif
-          printf '[package]\nname = "scene_releasex_nif"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\nname = "scene_releasex_nif"\npath = "src/lib.rs"\ncrate-type = ["dylib"]\n\n[dependencies]\nrustler = "0.35.1"\nserde = { version = "1.0", features = ["derive"] }\nserde_json = "1.0"\nscene_release = { path = "../../scene-release" }\n' > Cargo.toml
-          cd ../../scene-release
-          cd ../project/native/scene_releasex_nif
-          if [ "${{ matrix.job.use-cross }}" == "true" ]; then
-            cross build --release --target=${{ matrix.job.target }}
-          else
-            cargo build --release --target=${{ matrix.job.target }}
-          fi
+          echo "RUST_MIN_STACK=16777216" >> $GITHUB_ENV
 
-      - name: Rename lib
-        id: rename
-        shell: bash
-        run: |
-          LIB_PREFIX=lib
-          case ${{ matrix.job.target }} in
-            *-pc-windows-*) LIB_PREFIX="" ;;
-          esac
-          LIB_SUFFIX=.so
-          case ${{ matrix.job.target }} in
-            *-apple-darwin) LIB_SUFFIX=.dylib ;;
-            *-pc-windows-*) LIB_SUFFIX=.dll ;;
-          esac
-          CICD_INTERMEDIATES_DIR=$(mktemp -d)
-          LIB_DIR=${CICD_INTERMEDIATES_DIR}/released-lib
-          mkdir -p ${LIB_DIR}
-          LIB_NAME=${LIB_PREFIX}scene_releasex_nif${LIB_SUFFIX}
-          LIB_PATH=${LIB_DIR}/${LIB_NAME}
-          cp target/${{ matrix.job.target }}/release/${LIB_NAME} ${LIB_DIR}
-          LIB_FINAL_SUFFIX=${LIB_SUFFIX}
-          case ${{ matrix.job.target }} in
-            *-apple-darwin) LIB_FINAL_SUFFIX=.so ;;
-          esac
-          LIB_FINAL_NAME=${LIB_PREFIX}scene_releasex_nif-v${PROJECT_VERSION}-nif-${RUSTLER_NIF_VERSION}-${{ matrix.job.target }}${LIB_FINAL_SUFFIX}
-          cp ${LIB_PATH} ${LIB_FINAL_NAME}
-          tar -cvzf ${LIB_FINAL_NAME}.tar.gz ${LIB_FINAL_NAME}
-          LIB_FINAL_PATH=${NIF_DIRECTORY}/${LIB_FINAL_NAME}.tar.gz
-          echo LIB_FINAL_PATH=${LIB_FINAL_PATH} >> $GITHUB_ENV
-          echo LIB_FINAL_NAME=${LIB_FINAL_NAME}.tar.gz >> $GITHUB_ENV
+      - name: Build the project
+        id: build-crate
+        uses: philss/rustler-precompiled-action@v1.1.4
+        with:
+          project-name: scene_releasex_nif
+          project-version: ${{ env.PROJECT_VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross }}
+          project-dir: "native/scene_releasex_nif"
 
-      - name: Upload artifact
+      - name: Artifact upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.LIB_FINAL_NAME }}
-          path: ${{ env.LIB_FINAL_PATH }}
+          name: ${{ steps.build-crate.outputs.file-name }}
+          path: ${{ steps.build-crate.outputs.file-path }}
 
       - name: Publish archives and packages
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.LIB_FINAL_PATH }}
+            ${{ steps.build-crate.outputs.file-path }}
         if: startsWith(github.ref, 'refs/tags/')
